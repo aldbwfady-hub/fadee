@@ -71,7 +71,8 @@ const BottomNav = ({ activePage, setActivePage }) => {
 // --- API Setup ---
 let ai;
 try {
-    ai = new GoogleGenAI({ apiKey: "AIzaSyBRfDUSaRSjrJ2HQokh4w8TkCK3JrVf4Po" });
+    ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
 } catch (error) {
     console.error("Failed to initialize GoogleGenAI:", error);
 }
