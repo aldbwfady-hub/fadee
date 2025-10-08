@@ -71,8 +71,7 @@ const BottomNav = ({ activePage, setActivePage }) => {
 // --- API Setup ---
 let ai;
 try {
-    ai = new GoogleGenAI({ apiKey: AIzaSyBRfDUSaRSjrJ2HQokh4w8TkCK3JrVf4Po });
-
+    ai = new GoogleGenAI({ apiKey: "AIzaSyBRfDUSaRSjrJ2HQokh4w8TkCK3JrVf4Po" });
 } catch (error) {
     console.error("Failed to initialize GoogleGenAI:", error);
 }
@@ -908,7 +907,7 @@ const QuizBuilderPage = () => {
                     </div>
                 )}
                 
-                <div className="summarizer-controls">
+                <div className="quiz-controls">
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -919,7 +918,7 @@ const QuizBuilderPage = () => {
                         aria-hidden="true"
                     />
                     <button onClick={() => fileInputRef.current?.click()} className="control-btn">
-                        <span className="material-icons">attach_file</span> إرفاق ملف أو صورة
+                        <span className="material-icons">attach_file</span> إرفاق ملف
                     </button>
                 </div>
 
