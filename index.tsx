@@ -12,6 +12,37 @@ declare global {
 // --- Main App Component ---
 const App = () => {
   const [activePage, setActivePage] = useState('chat');
+  const [showMotivationalModal, setShowMotivationalModal] = useState(false);
+  const [motivationalMessage, setMotivationalMessage] = useState('');
+
+  useEffect(() => {
+    const visitCountStr = localStorage.getItem('appVisitCount') || '0';
+    let visitCount = parseInt(visitCountStr, 10) + 1;
+
+    if (visitCount === 1 || visitCount % 15 === 0) {
+      setShowMotivationalModal(true);
+      const fetchMotivationalMessage = async () => {
+        if (!ai) {
+          setMotivationalMessage("قوتك لا تكمن في غياب الصعوبات، بل في قدرتك على تجاوزها. استمر.");
+          return;
+        }
+        try {
+          const prompt = "اكتب رسالة تحفيزية قصيرة وملهمة، لا تتجاوز ثلاث جمل، لطالب سوري يدرس في ظل الظروف الصعبة. يجب أن تكون الرسالة مشجعة وتركز على قوة الإرادة وأهمية العلم لمستقبل سوريا.";
+          const response = await ai.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: prompt,
+          });
+          setMotivationalMessage(response.text);
+        } catch (error) {
+          console.error("Failed to fetch motivational message:", error);
+          setMotivationalMessage("كل صفحة تقرأها اليوم هي خطوة تبني بها غداً مشرقاً لك ولوطنك.");
+        }
+      };
+      fetchMotivationalMessage();
+    }
+
+    localStorage.setItem('appVisitCount', visitCount.toString());
+  }, []);
 
   const renderPage = () => {
     switch (activePage) {
@@ -23,6 +54,8 @@ const App = () => {
         return <SummarizerPage />;
       case 'quiz':
         return <QuizBuilderPage />;
+      case 'iq':
+        return <IQTestPage />;
       case 'updates':
         return <UpdatesPage />;
       default:
@@ -32,6 +65,13 @@ const App = () => {
 
   return (
     <div className="app-container">
+      {showMotivationalModal && (
+        <MotivationalModal 
+          message={motivationalMessage} 
+          onClose={() => setShowMotivationalModal(false)} 
+        />
+      )}
+      <div className="top-bar"></div>
       <main className="content-container">
         {renderPage()}
       </main>
@@ -40,6 +80,29 @@ const App = () => {
   );
 };
 
+// --- Motivational Modal Component ---
+const MotivationalModal = ({ message, onClose }) => {
+    const isLoading = !message;
+    return (
+        <div className="motivational-modal-overlay">
+            <div className="motivational-modal-content">
+                <button onClick={onClose} className="modal-skip-btn">تخطي</button>
+                <span className="material-icons modal-icon">auto_awesome</span>
+                <h3>رسالة اليوم</h3>
+                {isLoading ? (
+                    <div className="loader" style={{margin: '1rem auto 2rem auto'}}></div>
+                ) : (
+                    <p>{message}</p>
+                )}
+                <button onClick={onClose} disabled={isLoading}>
+                    {isLoading ? 'لحظة من فضلك...' : 'ابدأ الآن'}
+                </button>
+            </div>
+        </div>
+    );
+};
+
+
 // --- Bottom Navigation Component ---
 const BottomNav = ({ activePage, setActivePage }) => {
   const navItems = [
@@ -47,6 +110,7 @@ const BottomNav = ({ activePage, setActivePage }) => {
     { id: 'books', icon: 'menu_book', label: 'الكتب' },
     { id: 'summarizer', icon: 'mediation', label: 'تلخيص' },
     { id: 'quiz', icon: 'quiz', label: 'أسئلة' },
+    { id: 'iq', icon: 'psychology', label: 'قياس الذكاء' },
     { id: 'updates', icon: 'campaign', label: 'التحديثات' },
   ];
 
@@ -276,7 +340,7 @@ const BooksPage = () => {
             name: 'المرحلة الابتدائية',
             icon: 'child_care',
             grades: [
-                { name: 'الصف الأول', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' } ] },
+                { name: 'الصف الأول', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=12unENA6S9VJQeYkbzkxRARZUvVkd8jKO' } ] },
                 { name: 'الصف الثاني', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' } ] },
                 { name: 'الصف الثالث', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' } ] },
                 { name: 'الصف الرابع', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
@@ -307,9 +371,13 @@ const BooksPage = () => {
         }
     ];
     
-    const handleDownload = (subjectName) => {
-        alert(`جاري تحميل كتاب ${subjectName} لـ ${selectedGrade.name}... (هذه وظيفة تجريبية)`);
-    }
+    const handleDownload = (subject) => {
+        if (subject.url) {
+            window.open(subject.url, '_blank');
+        } else {
+            alert(`جاري تحميل كتاب ${subject.name} لـ ${selectedGrade.name}... (هذه وظيفة تجريبية)`);
+        }
+    };
 
     const handleSelectStage = (stage) => {
         setSelectedStage(stage);
@@ -366,7 +434,7 @@ const BooksPage = () => {
                     <div key={index} className="book-card">
                         <span className="material-icons book-icon">{subject.icon}</span>
                         <h3>{subject.name}</h3>
-                        <button onClick={() => handleDownload(subject.name)}>
+                        <button onClick={() => handleDownload(subject)}>
                             <span className="material-icons">download</span>
                             تحميل
                         </button>
@@ -990,6 +1058,217 @@ const QuizBuilderPage = () => {
     );
 };
 
+// --- IQ Test Page Component ---
+const IQTestPage = () => {
+    const [testStarted, setTestStarted] = useState(false);
+    const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+    const [score, setScore] = useState(0);
+    const [testFinished, setTestFinished] = useState(false);
+    const [difficulty, setDifficulty] = useState('medium');
+    const [numQuestions, setNumQuestions] = useState(5);
+    const [currentTestQuestions, setCurrentTestQuestions] = useState<any[]>([]);
+    const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+    const [isAnswered, setIsAnswered] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+    const timeoutRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        // Clear timeout if the component unmounts
+        return () => {
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+            }
+        };
+    }, []);
+
+    const handleStartTest = async () => {
+        if (!ai) {
+            setError('لم يتم تهيئة واجهة برمجة التطبيقات.');
+            return;
+        }
+        setIsLoading(true);
+        setError('');
+
+        const difficultyMap = {
+            easy: 'سهل',
+            medium: 'متوسط',
+            hard: 'صعب'
+        };
+
+        const promptText = `
+            قم بإنشاء ${numQuestions} سؤالاً لاختبار الذكاء (IQ) بمستوى صعوبة "${difficultyMap[difficulty]}".
+            يجب أن تكون إجابتك بأكملها عبارة عن كائن JSON واحد بمفتاح واحد هو "questions".
+            يجب أن تكون قيمة "questions" عبارة عن مصفوفة من كائنات الأسئلة.
+
+            يجب أن يحتوي كل كائن سؤال على الخصائص التالية:
+            - "question": سلسلة نصية تحتوي على نص السؤال.
+            - "options": مصفوفة تحتوي على 4 سلاسل نصية بالضبط تمثل خيارات الاختيار من متعدد.
+            - "correctAnswer": سلسلة نصية تحتوي على الإجابة الصحيحة، والتي يجب أن تكون إحدى السلاسل النصية من مصفوفة "options".
+
+            يرجى الالتزام الصارم بتنسيق JSON هذا. يجب أن تكون جميع النصوص باللغة العربية.
+        `;
+
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: { parts: [{ text: promptText }] },
+                config: {
+                    responseMimeType: "application/json",
+                },
+            });
+            const jsonStr = response.text.trim();
+            const parsedJson = JSON.parse(jsonStr);
+
+            if (parsedJson.questions && parsedJson.questions.length > 0) {
+                setCurrentTestQuestions(parsedJson.questions);
+                setTestStarted(true);
+                setTestFinished(false);
+                setCurrentQuestionIndex(0);
+                setScore(0);
+                setIsAnswered(false);
+                setSelectedAnswer(null);
+            } else {
+                throw new Error("Generated questions are invalid or empty.");
+            }
+        } catch (err) {
+            console.error("Error generating IQ questions:", err);
+            setError('عذراً، حدث خطأ أثناء إنشاء الأسئلة. الرجاء المحاولة مرة أخرى.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleAnswerClick = (selectedOption: string) => {
+        if (isAnswered) return;
+
+        setIsAnswered(true);
+        setSelectedAnswer(selectedOption);
+
+        if (selectedOption === currentTestQuestions[currentQuestionIndex].correctAnswer) {
+            setScore(prevScore => prevScore + 1);
+        }
+
+        timeoutRef.current = window.setTimeout(() => {
+            const nextQuestionIndex = currentQuestionIndex + 1;
+            if (nextQuestionIndex < currentTestQuestions.length) {
+                setCurrentQuestionIndex(nextQuestionIndex);
+                setIsAnswered(false);
+                setSelectedAnswer(null);
+            } else {
+                setTestFinished(true);
+            }
+        }, 1200);
+    };
+    
+    const getScoreMessage = () => {
+        const percentage = (score / currentTestQuestions.length) * 100;
+        if (percentage >= 90) {
+            return "مذهل! نتيجتك تشير إلى مستوى عالٍ جدًا من الذكاء والقدرة على التحليل العميق. أنت تمتلك عقلاً استثنائياً.";
+        } else if (percentage >= 70) {
+            return "أداء رائع! أنت أذكى من المتوسط ولديك مهارات تفكير منطقي قوية. استمر في تحدي عقلك.";
+        } else if (percentage >= 50) {
+            return "نتيجة جيدة! أنت تمتلك مستوى جيد من الذكاء. الممارسة المستمرة ستصقل مهاراتك أكثر.";
+        } else if (percentage >= 30) {
+            return "لا بأس بها. كل رحلة تبدأ بخطوة. حاول مرة أخرى وركز على فهم نمط الأسئلة.";
+        } else {
+            return "هذه مجرد بداية. لا تدع هذه النتيجة تحبطك. التدريب والممارسة يصنعان الفارق!";
+        }
+    };
+
+    if (!testStarted) {
+        return (
+            <div className="page iq-test-page">
+                <div className="iq-welcome-card">
+                    <span className="material-icons iq-welcome-icon">psychology</span>
+                    <h1>اختبار الذكاء</h1>
+                    <p>اختر مستوى الصعوبة وعدد الأسئلة، ثم اختبر مهاراتك في التفكير المنطقي.</p>
+
+                    <div className="iq-test-form-controls">
+                        <div className="form-group">
+                            <label htmlFor="iq-difficulty">مستوى الصعوبة:</label>
+                            <select id="iq-difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)} disabled={isLoading}>
+                                <option value="easy">سهل</option>
+                                <option value="medium">متوسط</option>
+                                <option value="hard">صعب</option>
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label htmlFor="iq-num-questions">عدد الأسئلة:</label>
+                            <select id="iq-num-questions" value={numQuestions} onChange={(e) => setNumQuestions(Number(e.target.value))} disabled={isLoading}>
+                                <option value="5">5 أسئلة</option>
+                                <option value="10">10 أسئلة</option>
+                                <option value="15">15 سؤالاً</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button onClick={handleStartTest} className="iq-start-btn" disabled={isLoading}>
+                        {isLoading ? 'جاري إنشاء الأسئلة...' : 'ابدأ الاختبار'}
+                    </button>
+
+                    {isLoading && <div className="loader" style={{marginTop: '1rem'}}></div>}
+                    {error && <p className="error-message" style={{marginTop: '1rem'}}>{error}</p>}
+                </div>
+            </div>
+        );
+    }
+
+    if (testFinished) {
+        return (
+            <div className="page iq-test-page">
+                <div className="iq-results-card">
+                    <h1>انتهى الاختبار!</h1>
+                    <p className="iq-score-text">نتيجتك هي: <strong>{score}</strong> من <strong>{currentTestQuestions.length}</strong></p>
+                    <p className="iq-feedback-text">{getScoreMessage()}</p>
+                    <button onClick={() => setTestStarted(false)} className="iq-restart-btn">
+                        <span className="material-icons">refresh</span>
+                        العودة للقائمة
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    const currentQuestion = currentTestQuestions[currentQuestionIndex];
+    const progressPercentage = ((currentQuestionIndex) / currentTestQuestions.length) * 100;
+
+    return (
+        <div className="page iq-test-page">
+             <div className="iq-progress-bar-container">
+                <div className="iq-progress-bar" style={{ width: `${progressPercentage}%` }}></div>
+            </div>
+            <div className="iq-question-container">
+                <p className="iq-question-counter">السؤال {currentQuestionIndex + 1} من {currentTestQuestions.length}</p>
+                <h2 className="iq-question-text">{currentQuestion.question}</h2>
+                <div className="iq-options-list">
+                    {currentQuestion.options.map((option, index) => {
+                        let buttonClass = 'iq-option-btn';
+                        if (isAnswered) {
+                            if (option === currentQuestion.correctAnswer) {
+                                buttonClass += ' correct';
+                            } else if (option === selectedAnswer) {
+                                buttonClass += ' incorrect';
+                            }
+                        }
+                        return (
+                            <button 
+                                key={index} 
+                                onClick={() => handleAnswerClick(option)} 
+                                className={buttonClass}
+                                disabled={isAnswered}
+                            >
+                                {option}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 // --- Updates Page Component ---
 const UpdatesPage = () => {
     const updates = [
@@ -997,6 +1276,12 @@ const UpdatesPage = () => {
         { icon: 'note_alt', title: 'نوط وملخصات', description: 'ملخصات مركزة ونوط امتحانية لمساعدتك على المراجعة قبل الاختبارات.' },
         { icon: 'forum', title: 'غرف دردشة خاصة', description: 'غرف نقاش خاصة بكل دورة للتفاعل مع المعلمين والزملاء وطرح الأسئلة.' },
         { icon: 'auto_awesome', title: 'أنظمة ذكية للمساعدة', description: 'أدوات ذكية لتحليل تقدمك الدراسي وتقديم توصيات وخطط مخصصة لك.' }
+    ];
+
+    const socialLinks = [
+        { name: 'Facebook', href: '#', icon: <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.04C6.5 2.04 2 6.53 2 12.06c0 5.52 4.5 10.02 10 10.02s10-4.5 10-10.02C22 6.53 17.5 2.04 12 2.04zM13.5 18h-3v-7.5H9v-3h1.5V6.45c0-1.2.6-2.45 2.5-2.45H15v3h-1.5c-.3 0-.5.2-.5.5V10.5h2l-.5 3h-1.5V18z"/></svg> },
+        { name: 'Telegram', href: '#', icon: <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23l7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3L3.64 12c-.88-.25-.89-.86.2-1.08l16.2-6.16c.76-.29 1.44.14 1.22.91L20.1 18.03c-.22.8-1.02 1-1.5.64l-4.1-3.29l-1.93 1.83c-.22.23-.42.42-.81.42z"/></svg> },
+        { name: 'WhatsApp', href: '#', icon: <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38c1.45.79 3.08 1.21 4.79 1.21h.01c5.46 0 9.91-4.45 9.91-9.91c0-5.46-4.45-9.91-9.91-9.91zm0 18.17h-.01c-1.5 0-2.96-.4-4.22-1.13l-.3-.18l-3.12.82l.83-3.04l-.2-.31c-.82-1.28-1.25-2.76-1.25-4.32c0-4.54 3.69-8.23 8.24-8.23c4.54 0 8.23 3.69 8.23 8.23c0 4.54-3.69 8.23-8.23 8.23zm4.49-5.83c-.25-.12-1.47-.72-1.7-.8c-.22-.08-.38-.12-.54.12s-.64.8-.79.96c-.14.16-.29.18-.54.06c-.25-.12-1.05-.39-2-1.23c-.74-.66-1.23-1.48-1.38-1.72c-.14-.24-.01-.38.11-.5c.11-.11.24-.29.37-.43s.18-.24.27-.4c.09-.16.04-.3-.02-.42c-.06-.12-.54-1.3-.74-1.78s-.4-.41-.55-.41h-.48c-.16 0-.42.06-.64.3c-.22.24-.86.84-.86 2.04s.88 2.37 1 2.53s1.75 2.67 4.22 3.72c.59.25 1.05.4 1.41.51c.59.18 1.13.16 1.56.1c.48-.07 1.47-.6 1.67-1.18s.21-1.08.15-1.18c-.06-.1-.22-.16-.47-.28z"/></svg> }
     ];
 
     return (
@@ -1011,6 +1296,40 @@ const UpdatesPage = () => {
                         <p>{update.description}</p>
                     </div>
                 ))}
+            </div>
+
+            <div className="teacher-registration-section">
+                <h2>للمعلمين: احصل على حسابك</h2>
+                <p>تواصلوا معنا مباشرة عبر واتساب للحصول على حساب معلم والاستفادة من الميزات المخصصة لكم.</p>
+                <div className="teacher-registration-form">
+                    <a 
+                        href="https://wa.me/963987654321"
+                        className="whatsapp-register-btn" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                    >
+                        <svg viewBox="0 0 24 24"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38c1.45.79 3.08 1.21 4.79 1.21h.01c5.46 0 9.91-4.45 9.91-9.91c0-5.46-4.45-9.91-9.91-9.91zm0 18.17h-.01c-1.5 0-2.96-.4-4.22-1.13l-.3-.18l-3.12.82l.83-3.04l-.2-.31c-.82-1.28-1.25-2.76-1.25-4.32c0-4.54 3.69-8.23 8.24-8.23c4.54 0 8.23 3.69 8.23 8.23c0 4.54-3.69 8.23-8.23 8.23zm4.49-5.83c-.25-.12-1.47-.72-1.7-.8c-.22-.08-.38-.12-.54.12s-.64.8-.79.96c-.14.16-.29.18-.54.06c-.25-.12-1.05-.39-2-1.23c-.74-.66-1.23-1.48-1.38-1.72c-.14-.24-.01-.38.11-.5c.11-.11.24-.29.37-.43s.18-.24.27-.4c.09-.16.04-.3-.02-.42c-.06-.12-.54-1.3-.74-1.78s-.4-.41-.55-.41h-.48c-.16 0-.42.06-.64.3c-.22.24-.86.84-.86 2.04s.88 2.37 1 2.53s1.75 2.67 4.22 3.72c.59.25 1.05.4 1.41.51c.59.18 1.13.16 1.56.1c.48-.07 1.47-.6 1.67-1.18s.21-1.08.15-1.18c-.06-.1-.22-.16-.47-.28z"/></svg>
+                        <span>تواصل عبر واتساب</span>
+                    </a>
+                </div>
+            </div>
+
+            <div className="follow-us-section">
+                <h2 className="follow-us-title">تابعونا</h2>
+                <div className="social-links-container">
+                    {socialLinks.map((link) => (
+                        <a 
+                            key={link.name} 
+                            href={link.href} 
+                            className={`social-link social-link--${link.name.toLowerCase()}`}
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            aria-label={`تابعنا على ${link.name}`}
+                        >
+                            {link.icon}
+                        </a>
+                    ))}
+                </div>
             </div>
         </div>
     );
