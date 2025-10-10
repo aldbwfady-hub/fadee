@@ -874,33 +874,29 @@
     .welcome-toast {
         position: fixed;
         top: 20px;
-        right: 20px;
-        max-width: 350px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: calc(100% - 40px);
+        max-width: 400px;
         background-color: var(--surface-color);
         color: var(--text-color);
-        border-radius: 8px;
+        border-radius: 12px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-        display: flex;
-        align-items: flex-start;
         padding: 1rem;
         z-index: 2000;
-        border-right: 5px solid var(--primary-color);
-        animation: slideInFromRight 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        border-top: 5px solid var(--primary-color);
+        animation: slideInFromTop 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
     }
 
-    @keyframes slideInFromRight {
+    @keyframes slideInFromTop {
         from {
-            transform: translateX(110%);
+            transform: translate(-50%, -150%);
             opacity: 0;
         }
         to {
-            transform: translateX(0);
+            transform: translate(-50%, 0);
             opacity: 1;
         }
-    }
-
-    .toast-content {
-        flex-grow: 1;
     }
 
     .toast-content h4 {
@@ -917,14 +913,15 @@
     }
 
     .toast-close-btn {
+        position: absolute;
+        top: 10px;
+        left: 12px;
         background: none;
         border: none;
         color: #aaa;
         font-size: 1.5rem;
         font-weight: bold;
         cursor: pointer;
-        margin-left: -5px;
-        margin-right: 10px;
         padding: 0;
         line-height: 1;
         opacity: 0.7;
@@ -1099,7 +1096,7 @@
     }
 
     .social-link--facebook { background-color: #1877F2; }
-    .social-link--telegram { background-color: #0088cc; }
+    .social-link--instagram { background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%,#d6249f 60%,#285AEB 90%); }
     .social-link--whatsapp { background-color: #25D366; }
 
     /* --- IQ Test Page --- */
