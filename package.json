@@ -1,22 +1,11 @@
 {
-  "name": "copy-of-generated",
+  "name": "syrian-student-assistant",
+  "version": "1.1.0",
+  "description": "An intelligent assistant for Syrian students with a Netlify proxy for Gemini API.",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "dependencies": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@google/genai": "^1.22.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
-  }
+  "author": "",
+  "license": "ISC"
 }

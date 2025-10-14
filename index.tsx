@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
-import { GoogleGenAI, Chat } from '@google/genai';
 
 // Fix: Add a global declaration for `window.html2canvas` and `window.jspdf` to resolve TypeScript errors.
 declare global {
@@ -11,11 +10,30 @@ declare global {
   }
 }
 
+// Helper to call our proxy
+const callApi = async (body: any) => {
+    const response = await fetch('/api/gemini-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.json();
+        console.error("API Error:", errorBody);
+        throw new Error(`API request failed with status ${response.status}`);
+    }
+
+    return response.json();
+};
+
+
 // --- Main App Component ---
 const App = () => {
   const [activePage, setActivePage] = useState('chat');
   const [showMotivationalModal, setShowMotivationalModal] = useState(false);
   const [motivationalMessage, setMotivationalMessage] = useState('');
+  const [apiReady, setApiReady] = useState(true); // Assume ready, update on error
 
   useEffect(() => {
     const visitCountStr = localStorage.getItem('appVisitCount') || '0';
@@ -24,19 +42,16 @@ const App = () => {
     if (visitCount === 1 || visitCount % 15 === 0) {
       setShowMotivationalModal(true);
       const fetchMotivationalMessage = async () => {
-        if (!ai) {
-          setMotivationalMessage("قوتك لا تكمن في غياب الصعوبات، بل في قدرتك على تجاوزها. استمر.");
-          return;
-        }
         try {
           const prompt = "اكتب رسالة تحفيزية قصيرة وملهمة، لا تتجاوز ثلاث جمل، لطالب سوري يدرس في ظل الظروف الصعبة. يجب أن تكون الرسالة مشجعة وتركز على قوة الإرادة وأهمية العلم لمستقبل سوريا.";
-          const response = await ai.models.generateContent({
+          const response = await callApi({
               model: 'gemini-2.5-flash',
-              contents: prompt,
+              contents: [{ parts: [{ text: prompt }] }],
           });
           setMotivationalMessage(response.text);
         } catch (error) {
           console.error("Failed to fetch motivational message:", error);
+          setApiReady(false);
           setMotivationalMessage("كل صفحة تقرأها اليوم هي خطوة تبني بها غداً مشرقاً لك ولوطنك.");
         }
       };
@@ -47,6 +62,9 @@ const App = () => {
   }, []);
 
   const renderPage = () => {
+    if (!apiReady) {
+        return <div className="page"><div className="header"><h1>خطأ</h1></div><div className="error-message">لم يتمكن التطبيق من الاتصال بالخادم. قد يكون مفتاح API غير صحيح أو مفقود في إعدادات Netlify.</div></div>;
+    }
     switch (activePage) {
       case 'chat':
         return <ChatPage />;
@@ -133,15 +151,6 @@ const BottomNav = ({ activePage, setActivePage }) => {
   );
 };
 
-
-// --- API Setup ---
-let ai;
-try {
-    ai = new GoogleGenAI({ apiKey: "AIzaSyBRfDUSaRSjrJ2HQokh4w8TkCK3JrVf4Po" });
-} catch (error) {
-    console.error("Failed to initialize GoogleGenAI:", error);
-}
-
 // --- Helper Functions ---
 const fileToBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -197,7 +206,6 @@ const MarkdownRenderer = ({ text }) => {
 
 // --- Chat Page Component ---
 const ChatPage = () => {
-    const [chat, setChat] = useState<Chat | null>(null);
     const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -224,16 +232,6 @@ const ChatPage = () => {
     ];
 
     useEffect(() => {
-        if (ai) {
-            const newChat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                config: {
-                    systemInstruction: 'You are a helpful assistant for a student. Your responses should be encouraging and clear. Use Markdown for formatting like lists, bold text, etc., to make the output easy to read. Respond in Arabic.',
-                },
-            });
-            setChat(newChat);
-        }
-
         const timer = setTimeout(() => {
             setShowWelcomeModal(true);
         }, 3000);
@@ -266,10 +264,11 @@ const ChatPage = () => {
 
     const handleSendMessage = async (prompt?: string) => {
         const textToSend = typeof prompt === 'string' ? prompt : inputValue;
-        if ((!textToSend.trim() && !imageFile) || !chat || isLoading) return;
+        if ((!textToSend.trim() && !imageFile) || isLoading) return;
 
         const userMessage: { role: string; text: string; image: string | null; } = { role: 'user', text: textToSend, image: imagePreview };
-        setMessages(prev => [...prev, userMessage]);
+        const newMessages = [...messages, userMessage];
+        setMessages(newMessages);
 
         const currentImageFile = imageFile;
 
@@ -279,13 +278,18 @@ const ChatPage = () => {
         setIsLoading(true);
 
         try {
-            const messageParts: any[] = [];
+            const historyForApi = messages.map(msg => ({
+                role: msg.role === 'user' ? 'user' : 'model',
+                parts: msg.text ? [{ text: msg.text }] : [],
+            }));
+
+            const newUserMessageParts: any[] = [];
             if (textToSend.trim()) {
-                messageParts.push({ text: textToSend.trim() });
+                newUserMessageParts.push({ text: textToSend.trim() });
             }
             if (currentImageFile) {
                 const base64Data = await fileToBase64(currentImageFile);
-                messageParts.push({
+                newUserMessageParts.push({
                     inlineData: {
                         mimeType: currentImageFile.type,
                         data: base64Data,
@@ -293,7 +297,19 @@ const ChatPage = () => {
                 });
             }
             
-            const response = await chat.sendMessage({ message: messageParts });
+            const finalContents = [
+                ...historyForApi,
+                { role: 'user', parts: newUserMessageParts }
+            ];
+            
+            const response = await callApi({
+                model: 'gemini-2.5-flash',
+                contents: finalContents,
+                config: {
+                    systemInstruction: 'You are a helpful assistant for a student. Your responses should be encouraging and clear. Use Markdown for formatting like lists, bold text, etc., to make the output easy to read. Respond in Arabic.',
+                },
+            });
+
             const aiMessage = { role: 'model', text: response.text };
             setMessages(prev => [...prev, aiMessage]);
 
@@ -309,10 +325,6 @@ const ChatPage = () => {
     const handleCloseModal = () => {
         setShowWelcomeModal(false);
     };
-    
-    if(!ai) {
-        return <div className="page"><div className="header"><h1>الدردشة</h1></div><div className="error-message">لم يتم تهيئة واجهة برمجة التطبيقات. يرجى التحقق من مفتاح API الخاص بك.</div></div>;
-    }
 
     return (
         <div className="page chat-page">
@@ -698,7 +710,7 @@ const SummarizerPage = () => {
     };
 
     const handleSummarize = async () => {
-        if (files.length === 0 || !ai) return;
+        if (files.length === 0) return;
         setIsLoading(true);
         setResult(null);
 
@@ -731,10 +743,10 @@ const SummarizerPage = () => {
                     });
                 }
             }
-
-            const response = await ai.models.generateContent({
+            
+            const response = await callApi({
                 model: 'gemini-2.5-flash',
-                contents: { parts: messageParts },
+                contents: [{ parts: messageParts }],
                 config: {
                     responseMimeType: "application/json",
                 },
@@ -916,11 +928,6 @@ const SummarizerPage = () => {
         };
     }, [isMindMapFullscreen, onPanMove, onPanEnd]);
 
-
-    if (!ai) {
-        return <div className="page"><div className="header"><h1>تلخيص</h1></div><div className="error-message">لم يتم تهيئة واجهة برمجة التطبيقات. يرجى التحقق من مفتاح API الخاص بك.</div></div>;
-    }
-
     return (
         <div className="page summarizer-page">
             <div className="summarizer-input-box">
@@ -1070,7 +1077,7 @@ const QuizBuilderPage = () => {
     };
 
     const handleGenerateQuestions = async () => {
-        if ((!topic.trim() && files.length === 0) || !ai) return;
+        if (!topic.trim() && files.length === 0) return;
         setIsLoading(true);
         setQuestions([]);
         setError('');
@@ -1113,13 +1120,14 @@ const QuizBuilderPage = () => {
                 }
             }
 
-            const response = await ai.models.generateContent({
+            const response = await callApi({
                 model: 'gemini-2.5-flash',
-                contents: { parts: messageParts },
+                contents: [{ parts: messageParts }],
                 config: {
                     responseMimeType: "application/json",
                 },
             });
+
             const jsonStr = response.text.trim();
             const parsedJson = JSON.parse(jsonStr);
             setQuestions(parsedJson.questions || []);
@@ -1134,10 +1142,6 @@ const QuizBuilderPage = () => {
             setIsLoading(false);
         }
     };
-    
-    if (!ai) {
-        return <div className="page"><div className="header"><h1>أسئلة امتحانية</h1></div><div className="error-message">لم يتم تهيئة واجهة برمجة التطبيقات. يرجى التحقق من مفتاح API الخاص بك.</div></div>;
-    }
 
     return (
         <div className="page quiz-builder-page">
@@ -1285,10 +1289,6 @@ const IQTestPage = () => {
     }, []);
 
     const handleStartTest = async () => {
-        if (!ai) {
-            setError('لم يتم تهيئة واجهة برمجة التطبيقات.');
-            return;
-        }
         setIsLoading(true);
         setError('');
 
@@ -1312,13 +1312,14 @@ const IQTestPage = () => {
         `;
 
         try {
-            const response = await ai.models.generateContent({
+            const response = await callApi({
                 model: 'gemini-2.5-flash',
-                contents: { parts: [{ text: promptText }] },
+                contents: [{ parts: [{ text: promptText }] }],
                 config: {
                     responseMimeType: "application/json",
                 },
             });
+
             const jsonStr = response.text.trim();
             const parsedJson = JSON.parse(jsonStr);
 
