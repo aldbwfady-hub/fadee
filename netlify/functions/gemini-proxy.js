@@ -19,9 +19,27 @@ exports.handler = async function(event) {
   }
   
   // Get the request body from the frontend
-  const { model, contents, config } = JSON.parse(event.body);
+  const { model, contents, config = {} } = JSON.parse(event.body);
 
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  // **FIX:** Structure the request body according to the Gemini REST API specification.
+  const requestBody = { contents };
+  const generationConfig = {};
+
+  if (config.systemInstruction) {
+    requestBody.systemInstruction = {
+      parts: [{ text: config.systemInstruction }]
+    };
+  }
+
+  if (config.responseMimeType) {
+    generationConfig.responseMimeType = config.responseMimeType;
+  }
+  
+  if (Object.keys(generationConfig).length > 0) {
+    requestBody.generationConfig = generationConfig;
+  }
 
   try {
     const geminiResponse = await fetch(apiUrl, {
@@ -31,7 +49,7 @@ exports.handler = async function(event) {
         // This client header can help bypass regional restrictions
         'x-goog-api-client': 'genai-js/1.22.0'
       },
-      body: JSON.stringify({ contents, ...config }),
+      body: JSON.stringify(requestBody),
     });
 
     const responseData = await geminiResponse.json();
