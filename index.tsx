@@ -45,7 +45,7 @@ const App = () => {
         try {
           const prompt = "اكتب رسالة تحفيزية قصيرة وملهمة، لا تتجاوز ثلاث جمل، لطالب سوري يدرس في ظل الظروف الصعبة. يجب أن تكون الرسالة مشجعة وتركز على قوة الإرادة وأهمية العلم لمستقبل سوريا.";
           const response = await callApi({
-              model: 'gemini-2.5-flash',
+              model: 'google/gemini-flash-1.5',
               contents: [{ parts: [{ text: prompt }] }],
           });
           setMotivationalMessage(response.text);
@@ -303,7 +303,7 @@ const ChatPage = () => {
             ];
             
             const response = await callApi({
-                model: 'gemini-2.5-flash',
+                model: 'google/gemini-flash-1.5',
                 contents: finalContents,
                 config: {
                     systemInstruction: 'You are a helpful assistant for a student. Your responses should be encouraging and clear. Use Markdown for formatting like lists, bold text, etc., to make the output easy to read. Respond in Arabic.',
@@ -745,7 +745,7 @@ const SummarizerPage = () => {
             }
             
             const response = await callApi({
-                model: 'gemini-2.5-flash',
+                model: 'google/gemini-flash-1.5',
                 contents: [{ parts: messageParts }],
                 config: {
                     responseMimeType: "application/json",
@@ -1121,7 +1121,7 @@ const QuizBuilderPage = () => {
             }
 
             const response = await callApi({
-                model: 'gemini-2.5-flash',
+                model: 'google/gemini-flash-1.5',
                 contents: [{ parts: messageParts }],
                 config: {
                     responseMimeType: "application/json",
@@ -1313,7 +1313,7 @@ const IQTestPage = () => {
 
         try {
             const response = await callApi({
-                model: 'gemini-2.5-flash',
+                model: 'google/gemini-flash-1.5',
                 contents: [{ parts: [{ text: promptText }] }],
                 config: {
                     responseMimeType: "application/json",
