@@ -133,12 +133,14 @@ const BottomNav = ({ activePage, setActivePage }) => {
 
 
 // --- API Setup ---
-let ai;
-try {
-    ai = new GoogleGenAI({ apiKey: "AIzaSyBRfDUSaRSjrJ2HQokh4w8TkCK3JrVf4Po" });
-} catch (error) {
-    console.error("Failed to initialize GoogleGenAI:", error);
-}
+const response = await fetch("/.netlify/functions/chat", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({ message: userMessage })
+});
+
 
 // --- Helper Functions ---
 const fileToBase64 = (file) => new Promise((resolve, reject) => {
