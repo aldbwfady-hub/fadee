@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -125,6 +126,8 @@
 
     .nav-label {
         font-size: 10px;
+        position: relative;
+        bottom: 5px;
     }
     
     /* --- Loader --- */
@@ -293,20 +296,42 @@
       background-color: var(--primary-color);
       color: var(--text-on-primary-color);
       border-bottom-right-radius: 3px;
-      align-self: flex-end;
+      align-self: flex-start; /* RTL: right side */
     }
 
     .message-bubble.model {
       background-color: var(--surface-color);
       border: 1px solid var(--border-color);
       border-bottom-left-radius: 3px;
-      align-self: flex-start;
+      align-self: flex-end; /* RTL: left side */
     }
     
     .chat-image {
         max-width: 100%;
         border-radius: 8px;
         margin-bottom: 0.4rem;
+    }
+
+    /* --- Chat Message Formatting --- */
+    .message-text-content p {
+        margin: 0;
+        padding: 0;
+    }
+    .message-text-content p:not(:last-child) {
+        margin-bottom: 0.85rem;
+    }
+    .message-text-content ul,
+    .message-text-content ol {
+        padding-right: 1.3rem; /* RTL */
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+     .message-text-content li {
+        margin-bottom: 0.25rem;
+        line-height: 1.6;
+    }
+    .message-text-content strong {
+        font-weight: 600;
     }
 
     .chat-input-container {
@@ -415,6 +440,49 @@
         20% { opacity: 1; }
         100% { opacity: 0.2; }
     }
+    
+    .chat-welcome-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 1.7rem;
+        margin: auto 0;
+        color: #777;
+    }
+    .chat-welcome-container .material-icons {
+        font-size: 40px;
+        color: var(--primary-color);
+        margin-bottom: 0.85rem;
+    }
+    .chat-welcome-container h3 {
+        font-size: 1.1rem;
+        color: var(--text-color);
+        margin-bottom: 1.3rem;
+    }
+    .chat-suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        justify-content: center;
+    }
+    .chat-suggestions button {
+        background-color: var(--surface-color);
+        border: 1px solid var(--border-color);
+        border-radius: 17px;
+        padding: 0.4rem 0.85rem;
+        font-size: 0.8rem;
+        color: var(--text-color);
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .chat-suggestions button:hover {
+        background-color: var(--background-color);
+        border-color: var(--primary-color);
+        transform: translateY(-2px);
+    }
+
 
     /* --- Books Page --- */
     .books-header {
@@ -424,6 +492,18 @@
         position: relative;
         padding-bottom: 0.85rem;
         border-bottom: 2px solid var(--border-color);
+    }
+    
+    .books-intro-message {
+        background-color: #f0f5ff;
+        color: #434343;
+        border-right: 4px solid var(--primary-color);
+        border-radius: 8px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 1.5rem;
+        text-align: right;
+        font-size: 0.8rem;
+        line-height: 1.6;
     }
 
     .back-button {
@@ -699,46 +779,153 @@
     
     .mind-map-preview {
         max-height: 340px;
-        overflow: auto;
+        overflow: hidden;
         border: 1px solid var(--border-color);
         border-radius: 7px;
         padding: 0.85rem;
         background-color: var(--background-color);
     }
     
-    /* Mind Map (shared styling) */
-    .mind-map { direction: ltr; text-align: left; }
-    .mind-map ul { list-style-type: none; position: relative; padding-right: 17px; }
-    .mind-map ul ul { padding-right: 17px; }
-    .mind-map li { margin: 8px 0; position: relative; }
-    .mind-map li::before {
-        content: ''; position: absolute; top: 0; right: -17px;
-        border-right: 1px solid var(--primary-color);
-        width: 17px; height: 100%;
-    }
-    .mind-map li:last-child::before { height: 1.1em; }
-    .mind-map li span, .mind-map li strong {
-        display: inline-block;
-        padding: 7px 10px;
-        border-radius: 5px;
-        background: var(--surface-color);
-        border: 1px solid var(--primary-color);
-        min-width: 85px;
+    /* --- Mind Map Redesign --- */
+    .mind-map {
+        direction: ltr;
         text-align: center;
-        position: relative;
-    }
-    .mind-map li strong {
-        background-color: var(--primary-color);
-        color: var(--text-on-primary-color);
-    }
-    .mind-map li span::before, .mind-map li strong::before {
-        content: ''; position: absolute; top: 50%; right: -17px;
-        border-top: 1px solid var(--primary-color);
-        width: 17px; height: 0;
-        transform: translateY(-50%);
+        white-space: nowrap;
+        padding: 1.5em 0;
+        min-width: 100%;
     }
 
-    /* Mind Map Modal */
+    .mind-map ul {
+        list-style-type: none;
+        padding: 1.5em 0 0 0;
+        margin: 0;
+        position: relative;
+        display: inline-flex;
+        justify-content: center;
+    }
+
+    /* Vertical line from parent node down to its children's horizontal connector */
+    .mind-map ul::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 1px;
+        height: 1.5em;
+        background-color: #ced4da; /* Lighter gray */
+    }
+
+    /* Root UL has no line coming from above it */
+    .mind-map > ul::before {
+        display: none;
+    }
+
+    .mind-map li {
+        padding: 0 0.75em;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    /* Vertical line from node up to horizontal connector */
+    .mind-map li::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 1px;
+        height: 1.5em;
+        background-color: #ced4da; /* Lighter gray */
+    }
+
+    /* Horizontal line connecting siblings */
+    .mind-map li::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 1px;
+        background-color: #ced4da; /* Lighter gray */
+    }
+
+    /* Adjust horizontal line for first and last child */
+    .mind-map li:first-child:not(:only-child)::after {
+        width: 50%;
+        left: 50%;
+    }
+    .mind-map li:last-child:not(:only-child)::after {
+        width: 50%;
+        left: 0;
+    }
+    /* Hide horizontal line for a single child */
+    .mind-map li:only-child::after {
+        display: none;
+    }
+
+    /* --- NODE STYLING --- */
+    .mind-map li span, .mind-map li strong {
+        display: inline-block;
+        padding: 10px 20px;
+        border-radius: 25px; /* Pill shape */
+        background: var(--surface-color);
+        border: 1px solid var(--border-color);
+        text-align: right; /* RTL text */
+        direction: rtl;
+        position: relative; /* Stacking context for children ul */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08); /* Softer shadow */
+        transition: all 0.2s ease-in-out;
+        cursor: default;
+        white-space: normal; 
+        min-width: 130px;
+        max-width: 200px; /* Prevent nodes from becoming too wide */
+        font-size: 0.8rem;
+    }
+
+    .mind-map li:hover > span, .mind-map li:hover > strong {
+        transform: translateY(-3px) scale(1.02);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+        border-color: var(--primary-dark);
+    }
+
+    /* Color coding for different levels */
+
+    /* Level 0 (Root) */
+    .mind-map > ul > li > * {
+        background-color: var(--primary-color);
+        color: var(--text-on-primary-color);
+        font-size: 0.9rem;
+        font-weight: 700;
+    }
+
+    /* Level 1 */
+    .mind-map > ul > li > ul > li > * {
+        background-color: #f0e9dd; /* Lighter gold */
+        color: var(--text-color);
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    /* Level 2 */
+    .mind-map > ul > li > ul > li > ul > li > * {
+        background-color: #fdfaf5; /* Even lighter gold */
+        font-weight: normal;
+    }
+
+    /* Level 3 and deeper (fallback) */
+    .mind-map > ul > li > ul > li > ul > li > ul > li > * {
+        background-color: var(--surface-color);
+    }
+
+    /* Position child ul below the node */
+    .mind-map li > ul {
+        margin-top: 0.75em;
+    }
+
+    /* Mind Map Modal & Controls */
     .mind-map-modal {
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background: var(--background-color); z-index: 1001;
@@ -748,20 +935,23 @@
         position: absolute; top: 0.85rem; left: 0.85rem; z-index: 1002;
         display: flex; flex-direction: column; gap: 0.4rem;
         background: rgba(255,255,255,0.8); padding: 0.4rem; border-radius: 7px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .mind-map-controls button {
         background: var(--surface-color); border: 1px solid var(--border-color);
         width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
+        color: var(--text-color);
     }
     .mind-map-viewport {
-        width: 100%; height: 100%; overflow: hidden; cursor: grab;
+        width: 100%; height: 100%; overflow: visible; cursor: grab;
     }
     .mind-map-viewport:active { cursor: grabbing; }
     .mind-map-modal .mind-map {
-        padding: 1.7rem;
+        padding: 2.5rem; /* More padding in fullscreen */
         transform-origin: center center;
         transition: transform 0.2s ease-out;
+        overflow: visible;
     }
     
     /* --- Quiz Builder Page --- */
@@ -1341,22 +1531,26 @@
         transform: translateY(-2px);
     }
 
-    .modal-skip-btn {
+    .motivational-modal-content .modal-skip-btn {
         position: absolute;
         top: 0.85rem;
-        left: 1.3rem; /* for RTL, this is top-right */
-        background: none;
-        border: none;
+        left: 1.3rem;
+        background-color: transparent;
         color: #999;
+        border: none;
+        padding: 0.2rem;
+        border-radius: 0;
         font-size: 0.75rem;
         font-weight: 500;
         cursor: pointer;
         transition: color 0.2s;
-        padding: 0.2rem;
+        transform: none;
     }
 
-    .modal-skip-btn:hover {
+    .motivational-modal-content .modal-skip-btn:hover {
+        background-color: transparent;
         color: var(--text-color);
+        transform: none;
     }
     
     @keyframes fadeIn {
@@ -1385,6 +1579,7 @@
 <body>
   <div id="root"></div>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

@@ -1,11 +1,13 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom/client';
 import { GoogleGenAI, Chat } from '@google/genai';
 
-// Fix: Add a global declaration for `window.html2canvas` to resolve TypeScript errors at lines 451 and 466.
+// Fix: Add a global declaration for `window.html2canvas` and `window.jspdf` to resolve TypeScript errors.
 declare global {
   interface Window {
     html2canvas: (element: HTMLElement, options?: any) => Promise<HTMLCanvasElement>;
+    jspdf: any;
   }
 }
 
@@ -133,14 +135,12 @@ const BottomNav = ({ activePage, setActivePage }) => {
 
 
 // --- API Setup ---
-const response = await fetch("/.netlify/functions/chat", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json"
-  },
-  body: JSON.stringify({ message: userMessage })
-});
-
+let ai;
+try {
+    ai = new GoogleGenAI({ apiKey: "AIzaSyBRfDUSaRSjrJ2HQokh4w8TkCK3JrVf4Po" });
+} catch (error) {
+    console.error("Failed to initialize GoogleGenAI:", error);
+}
 
 // --- Helper Functions ---
 const fileToBase64 = (file) => new Promise((resolve, reject) => {
@@ -156,6 +156,44 @@ const fileToBase64 = (file) => new Promise((resolve, reject) => {
     reader.onerror = error => reject(error);
 });
 
+// --- Markdown Renderer ---
+const MarkdownRenderer = ({ text }) => {
+    const toHtml = (markdown) => {
+        const blocks = markdown.split(/\n\n+/); // Split by one or more blank lines
+        
+        const html = blocks.map(block => {
+            // Escape basic HTML tags to prevent interference
+            let processedBlock = block
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            // Inline formatting for bold/italic first
+            processedBlock = processedBlock
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+            // Check for list
+            if (processedBlock.match(/^\s*([-*]|\d+\.)/)) {
+                const lines = processedBlock.split('\n');
+                const listTag = processedBlock.match(/^\s*\d+\./) ? 'ol' : 'ul';
+                const items = lines.map(line => {
+                    if (line.trim()) {
+                       return `<li>${line.replace(/^\s*([-*]|\d+\.)\s*/, '')}</li>`
+                    }
+                    return '';
+                }).join('');
+                return `<${listTag}>${items}</${listTag}>`;
+            }
+            // Otherwise, it's a paragraph
+            else {
+                return `<p>${processedBlock.replace(/\n/g, '<br/>')}</p>`;
+            }
+        }).join('');
+        return { __html: html };
+    };
+
+    return <div className="message-text-content" dangerouslySetInnerHTML={toHtml(text)} />;
+};
 
 // --- Chat Page Component ---
 const ChatPage = () => {
@@ -166,15 +204,31 @@ const ChatPage = () => {
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+    const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const allSuggestions = [
+        'اشرح لي قاعدة فيثاغورس',
+        'لخص لي نصاً عن الثورة الصناعية',
+        'كيف أكتب موضوع تعبير؟',
+        'ما هي خطوات المنهج العلمي؟',
+        'ترجم لي هذه الجملة: "Knowledge is power"',
+        'أعطني مثالاً على التشبيه في الشعر',
+        'ما هي عاصمة البرازيل؟',
+        'ساعدني في فهم مسألة في الكيمياء',
+        'حل لي هذه المعادلة: 2x + 5 = 15',
+        'ما الفرق بين الطقس والمناخ؟',
+        'اكتب لي قصيدة قصيرة عن الأمل',
+        'من هو ابن خلدون؟'
+    ];
 
     useEffect(() => {
         if (ai) {
             const newChat = ai.chats.create({
                 model: 'gemini-2.5-flash',
                 config: {
-                    systemInstruction: 'You are a helpful assistant for a student. Your responses should be encouraging and clear. Respond in Arabic.',
+                    systemInstruction: 'You are a helpful assistant for a student. Your responses should be encouraging and clear. Use Markdown for formatting like lists, bold text, etc., to make the output easy to read. Respond in Arabic.',
                 },
             });
             setChat(newChat);
@@ -183,6 +237,9 @@ const ChatPage = () => {
         const timer = setTimeout(() => {
             setShowWelcomeModal(true);
         }, 3000);
+        
+        const shuffled = [...allSuggestions].sort(() => 0.5 - Math.random());
+        setChatSuggestions(shuffled.slice(0, 3));
 
         return () => clearTimeout(timer);
     }, []);
@@ -207,13 +264,13 @@ const ChatPage = () => {
         setImagePreview(null);
     };
 
-    const handleSendMessage = async () => {
-        if ((!inputValue.trim() && !imageFile) || !chat || isLoading) return;
+    const handleSendMessage = async (prompt?: string) => {
+        const textToSend = typeof prompt === 'string' ? prompt : inputValue;
+        if ((!textToSend.trim() && !imageFile) || !chat || isLoading) return;
 
-        const userMessage: { role: string; text: string; image: string | null; } = { role: 'user', text: inputValue, image: imagePreview };
+        const userMessage: { role: string; text: string; image: string | null; } = { role: 'user', text: textToSend, image: imagePreview };
         setMessages(prev => [...prev, userMessage]);
 
-        const currentInputValue = inputValue;
         const currentImageFile = imageFile;
 
         setInputValue('');
@@ -223,8 +280,8 @@ const ChatPage = () => {
 
         try {
             const messageParts: any[] = [];
-            if (currentInputValue.trim()) {
-                messageParts.push({ text: currentInputValue.trim() });
+            if (textToSend.trim()) {
+                messageParts.push({ text: textToSend.trim() });
             }
             if (currentImageFile) {
                 const base64Data = await fileToBase64(currentImageFile);
@@ -269,10 +326,25 @@ const ChatPage = () => {
                 </div>
             )}
             <div className="chat-history">
+                {messages.length === 0 && !isLoading && (
+                    <div className="chat-welcome-container">
+                        <span className="material-icons">auto_awesome</span>
+                        <h3>مرحباً بك! كيف يمكنني مساعدتك اليوم؟</h3>
+                        <div className="chat-suggestions">
+                            {chatSuggestions.map((suggestion, index) => (
+                                <button key={index} onClick={() => handleSendMessage(suggestion)}>{suggestion}</button>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {messages.map((msg, index) => (
                     <div key={index} className={`message-bubble ${msg.role}`}>
                         {msg.image && <img src={msg.image} alt="ملحق المستخدم" className="chat-image" />}
-                        {msg.text && <p className="message-text">{msg.text}</p>}
+                        {msg.text && (
+                           msg.role === 'model' 
+                           ? <MarkdownRenderer text={msg.text} /> 
+                           : <p className="message-text">{msg.text}</p>
+                        )}
                     </div>
                 ))}
                  {isLoading && (
@@ -320,7 +392,7 @@ const ChatPage = () => {
                         disabled={isLoading}
                     />
                     <button 
-                        onClick={handleSendMessage} 
+                        onClick={() => handleSendMessage()} 
                         disabled={isLoading || (!inputValue.trim() && !imageFile)} 
                         aria-label="إرسال رسالة"
                     >
@@ -342,33 +414,115 @@ const BooksPage = () => {
             name: 'المرحلة الابتدائية',
             icon: 'child_care',
             grades: [
-                { name: 'الصف الأول', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=12unENA6S9VJQeYkbzkxRARZUvVkd8jKO' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1F0btzUkiru74_6H3n3AyMH2hLr8rIdFN' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1Hx-tv1MoTEhysqdwgRQsKhohOYEO-7ez' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1_Jra5xK8oqFUNrYXC1cDdTTvY23zutZH' } ] },
-                { name: 'الصف الثاني', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' } ] },
-                { name: 'الصف الثالث', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' } ] },
-                { name: 'الصف الرابع', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'الصف الخامس', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' }, { name: 'الاجتماعيات', icon: 'public' } ] },
-                { name: 'الصف السادس', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'العلوم', icon: 'science' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' }, { name: 'الاجتماعيات', icon: 'public' } ] },
+                { name: 'الصف الأول', subjects: [ { name: 'الرياضيات (الفصل الأول)', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1TnCylQZ7qKY7XEw-Qo2vr7uu-BpBC8Mj' }, { name: 'الرياضيات (الفصل الثاني)', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1pBG_bU66WtgEDRdvMBGqAH82WQP7S5qs' }, { name: 'العلوم (الفصل الأول)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1kJXYTqWrS1UhbxsilSEEqMxqRYKiiTh2' }, { name: 'العلوم (الفصل الثاني)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=16HWSu4CfllLyk6nOhje2K6q9n7DYj4an' }, { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=12unENA6S9VJQeYkbzkxRARZUvVkd8jKO' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1F0btzUkiru74_6H3n3AyMH2hLr8rIdFN' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1Hx-tv1MoTEhysqdwgRQsKhohOYEO-7ez' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1_Jra5xK8oqFUNrYXC1cDdTTvY23zutZH' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1v6cvKWgsgHRBC3qAQry8VvgGL_4TbMIm' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1ltkngUTw29rh8ZLeY7U1YFJEpV08kFb7' }, { name: 'الدراسات الاجتماعية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=12rDoiaduORslwwigbMU8Y3bcz4MlknJO' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1NiopNk0TfyYXsmBwxcpjFfOI8UHnptOQ' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=14kSTZLlSO_SKD8nk-RdqYyNJOXfYEDZR' } ] },
+                { name: 'الصف الثاني', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1C41bpOxorJU6d__CNry9WohIYDTBK-np' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1bLkxtYS6ym9YsXly1HzZ83Sd6E2Ha879' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=19tfYmIMpq2M7HhY92Dep6gaWawHKwz1k' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1DDj39gMMqOcpxzLn3iOAqCrR38QlDkrR' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1HBZP5YyzoYRhAHcUEvECG2b1zjJWlqyw' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1Qdg-3kdI1X5sFRtMQk5uWZB24vRZqpbK' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1p1IlODXabxZgTDZKOH0jt2d_sr3uo7EL' }, { name: 'الرياضيات (فصل أول)', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1hc6oNsAw5PGZjuHR8RgEw8gPpNEinX3e' }, { name: 'الرياضيات (فصل ثاني)', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1VzwCLAH3tE-OAquAUGxKEO6daJWTx-TA' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1UzTuVXz3aPCAF-pAwv1-tVa07tQrEVJx' }, { name: 'العلوم (فصل أول)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1I8enxrqh3lQ0se7f66X1xZ6Uc1A0tnsN' }, { name: 'العلوم (فصل ثاني)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1GrFyNESdQC2lbnvihJaIi6GUIYxLPjCj' }, { name: 'الدراسات الاجتماعية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=18UqD5GI3BY1vW2Y7WOxaiN_OgrWWs_3U' } ] },
+                { name: 'الصف الثالث', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1FH9pizdg3OszpocYdmek3wx2vb8GRTvY' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=10Nn4H-d_ejtoCN7gLGc95foomJU7WZ4w' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=1DAmEW1JiyzocDj_Sq1bkWzx7dSvlhAi8' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1-ySKgJQhLRV4paflPxZ2794ioyMyDLFp' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1MbAG0zkWkksTT_C12Quk1W5vcOKLUS9h' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1WXXgigJLQVcXeiXofgNK2Yr6g5f3ZkDK' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1o_w6WRwSpS8FZ4rmpOvu-3fG2sSYLbM2' }, { name: 'الرياضيات', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1suiqkaNtYpNTfX8XZ-j_-Z5p5iW0SaJc' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=14BfmigSiSNpgS5JUEs8A6RxleAu_d2kn' }, { name: 'العلوم (فصل أول)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=12P4Puu6pFqQ5kzK2qcveS5sVPqXkExaf' }, { name: 'العلوم (فصل ثاني)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1rmkdOF4f3gf7GwH6wEyT7Q-iRWNndKV4' }, { name: 'الدراسات الاجتماعية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1PGF2m5Yb8EPrQnqcahTOJ41BBHpg9e9T' } ] },
+                { name: 'الصف الرابع', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1FSlLrQavjFa3mOhlBBQMYnANEYZxP_CV' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1dS9y-tPkjqmwX05vBQoHie7mvV0Zltiw' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=1vH99kO2NllU0gJErjz8yKO8V4HTJqtDM' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1-iYkMXv7Cxi44fLYoov32O1SCHt9dAUD' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1RTkPZ20qIqJDzzyWPWUPHKEP-vVbgTst' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=18LFhWJ3GAs2UfRFl6GRxg8PhOE8yuSwG' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1iMsviYvlR-FPO4PS9jC0C9zJwZp9tYAh' }, { name: 'الرياضيات', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1WJiivgPOF3ZEZqCQq1amPfjk15gknyko' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1vhJcLIP34kK5jWOUyrXEo3tE9Uuj_rI1' }, { name: 'العلوم (فصل أول)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1N5dIudTRW-TnXGBHekgz2hBKpVXSw4UO' }, { name: 'العلوم (فصل ثاني)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1-jhmMiyyF4yoi6bG8ZewX0KfWa7WYlia' }, { name: 'الدراسات الاجتماعية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1J0yhI_f__ugVkUI7G4Kps34IcbdfUwbE' }, { name: 'التربية المهنية (فصل أول)', icon: 'build', url: 'https://drive.google.com/uc?export=download&id=1xs6MTvUKJ16C77qmyunMzdfVwfvU8D-k' }, { name: 'التربية المهنية (فصل ثاني)', icon: 'build', url: 'https://drive.google.com/uc?export=download&id=1tUkHMqyY85AbW_ilpK4bo3yXURGDbXTd' } ] },
+                { name: 'الصف الخامس', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1N8oCCbDdXJvtnzlxY-91s_YbyS3JIL4Q' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1HpXD1cdtJmVTXJOhDrRj-k3WZ9IBxvDT' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=1JDs-El1_LcvFaN5rieyhAD2A0k0Y0KLy' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=17Fetm1DbtSmXdS38fm26IVC9Vz022BVC' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=12GuG6T3qkS1aFS3GdkHKOgQibMa1DtEL' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1NkMXf8U5CMBe5ySXTiONLtSpXyF62R58' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1AtU-pZjBRfTHbTTKxqWjSeuKr1Ri4PMS' }, { name: 'الرياضيات', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1fleAPXHix4IIFDcyW5AzZf12n7whSm5e' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=17NfXszpg4Y2Ad_CP7zR-wKl4xTnO4rRB' }, { name: 'العلوم (فصل أول)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1TAPqvDo8h6k7TwQNadz1Dbvy5FOiBjpF' }, { name: 'العلوم (فصل ثاني)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1nrzBO57cezc8t5cHX0xvhhxNUqcJ6Krx' }, { name: 'التربية المهنية (فصل أول)', icon: 'build', url: 'https://drive.google.com/uc?export=download&id=1nrzBO57cezc8t5cHX0xvhhxNUqcJ6Krx' }, { name: 'التربية المهنية (فصل ثاني)', icon: 'build', url: 'https://drive.google.com/uc?export=download&id=1G0RkhXHjkA1xQCPv2JpyCoYjvDl8k9bt' } ] },
+                { name: 'الصف السادس', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1xTRTBQWPJVbbRMHBZpy88ZscWM6LE_D1' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1ewPBvJN76ud-ksgw0izDCXgiKhTCk9us' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=17ZZmZanQ_yReYMoqppjuZ4fMdZjFfmXj' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1xlzBnxyBCtjZAN5Mes1E8BuAnsKq8Pyb' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1nIrt_yazEiDYwMnkvDhYMby4Y-8EVeUv' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1sWClsTGi06IMm0rDgwX0s5vnjvODXuNh' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1hNdiEkeN-Rs_-IcD0Ph3QnD8YtbcdyYb' }, { name: 'الرياضيات', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1RZi8lBYtWvdfLctwnS8rDrT6nkSunNNS' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1Z067Q0cPWH27_9ptOu6LNv-mv1yP-t9T' }, { name: 'العلوم (فصل أول)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1aDL2x3iDDYNrhDj2lL9KyzKHaFPspjdb' }, { name: 'العلوم (فصل ثاني)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1fWcI0dVDKphoOWdgwgVqPXVO9NIa3wwg' }, { name: 'الدراسات الاجتماعية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1s_83el-eE2K3u_TqHTHnF9ixh9e4EqnZ' }, { name: 'التربية المهنية (فصل أول)', icon: 'build', url: 'https://drive.google.com/uc?export=download&id=1-D5TKDomnebmR6RJF_ZAYM1FRfW4g1ca' }, { name: 'التربية المهنية (فصل ثاني)', icon: 'build', url: 'https://drive.google.com/uc?export=download&id=1YzaPg76-a82KHiiEXORYASCdVWsMiFBj' } ] },
             ]
         },
         {
             name: 'المرحلة الإعدادية',
             icon: 'history_edu',
             grades: [
-                { name: 'الصف السابع', subjects: [ { name: 'الجبر', icon: 'calculate' }, { name: 'الهندسة', icon: 'architecture' }, { name: 'العلوم', icon: 'science' }, { name: 'التاريخ', icon: 'history_edu' }, { name: 'الجغرافيا', icon: 'public' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'الصف الثامن', subjects: [ { name: 'الجبر', icon: 'calculate' }, { name: 'الهندسة', icon: 'architecture' }, { name: 'العلوم', icon: 'science' }, { name: 'التاريخ', icon: 'history_edu' }, { name: 'الجغرافيا', icon: 'public' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'الصف التاسع', subjects: [ { name: 'الجبر', icon: 'calculate' }, { name: 'الهندسة', icon: 'architecture' }, { name: 'الفيزياء والكيمياء', icon: 'science' }, { name: 'علم الأحياء', icon: 'biotech' }, { name: 'التاريخ', icon: 'history_edu' }, { name: 'الجغرافيا', icon: 'public' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
+                { name: 'الصف السابع', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1Xal1Skvy2pQZonQcsTTpv0OgY24wfTLb' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1jAT5TlMLgnfLy_dDlcxc0IbHnNS1XlY6' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=1x6kn0G9XlF5Z79bDNK3eReF-uyJVh7X9' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1wacKgTuPKHMzhEKVzgw49Yrm0pe1FxOC' }, { name: 'اللغة الإنكليزية (كتاب التمرين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1ypDcdSgm5zL4JBqO70ijOOpFdl6H9tlU' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1BoDnctYL5RbqMvX_mnzwzrVH0g7XjWez' }, { name: 'اللغة الفرنسية (كتاب التمرين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1DnfJKKud14PwQXQe-mdQQyqLKTD3RPF1' }, { name: 'اللغة الفرنسية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1PO5SKzSOJs9zwFmeP5chQiKkwmjlX5jU' }, { name: 'الجغرافية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1uGnLs0RQk4owpjIqwH3IaFRXfsdxUGBM' }, { name: 'التاريخ', icon: 'history_edu', url: 'https://drive.google.com/uc?export=download&id=1cdk4aviMQ4ueg61W27DOeFhTXSq2yIgj' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1-jLbRBOOiXpr4Kx-fuTa5NJCGuyOPfaH' }, { name: 'الرياضيات', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=18OWIAairt0q8eHpzcJSeiDc6CuKzQKj5' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1hPfFCTaKGtOlyTTzFMJ38pCmr36GA05L' }, { name: 'الفيزياء - الكيمياء', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1x3tWmZkaKabGN2LLk4mdnEDUVRdbWm1s' }, { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1MSLzGuoI_T4kjHN3zKRqyQMD9mEi24Pg' }, { name: 'العلوم', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1XN7ktLEk4nhtkQQ0tUIUd5t1Un2kF5CF' }, { name: 'تكنلوجية الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=18e9_0WU9WafnzbZc3D-_VugPQSJai7Je' } ] },
+                { name: 'الصف الثامن', subjects: [ { name: 'اللغة العربية (فصل أول)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1Xal1Skvy2pQZonQcsTTpv0OgY24wfTLb' }, { name: 'اللغة العربية (فصل ثاني)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1jAT5TlMLgnfLy_dDlcxc0IbHnNS1XlY6' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=1x6kn0G9XlF5Z79bDNK3eReF-uyJVh7X9' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1wacKgTuPKHMzhEKVzgw49Yrm0pe1FxOC' }, { name: 'اللغة الإنكليزية (كتاب التمرين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1ypDcdSgm5zL4JBqO70ijOOpFdl6H9tlU' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1BoDnctYL5RbqMvX_mnzwzrVH0g7XjWez' }, { name: 'اللغة الفرنسية (كتاب التمرين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1DnfJKKud14PwQXQe-mdQQyqLKTD3RPF1' }, { name: 'اللغة الفرنسية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1PO5SKzSOJs9zwFmeP5chQiKkwmjlX5jU' }, { name: 'الجغرافية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1uGnLs0RQk4owpjIqwH3IaFRXfsdxUGBM' }, { name: 'التاريخ', icon: 'history_edu', url: 'https://drive.google.com/uc?export=download&id=1cdk4aviMQ4ueg61W27DOeFhTXSq2yIgj' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1-jLbRBOOiXpr4Kx-fuTa5NJCGuyOPfaH' }, { name: 'الرياضيات', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=18OWIAairt0q8eHpzcJSeiDc6CuKzQKj5' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1hPfFCTaKGtOlyTTzFMJ38pCmr36GA05L' }, { name: 'الفيزياء - الكيمياء', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1x3tWmZkaKabGN2LLk4mdnEDUVRdbWm1s' }, { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1MSLzGuoI_T4kjHN3zKRqyQMD9mEi24Pg' }, { name: 'العلوم', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1XN7ktLEk4nhtkQQ0tUIUd5t1Un2kF5CF' }, { name: 'تكنلوجية الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=18e9_0WU9WafnzbZc3D-_VugPQSJai7Je' } ] },
+                { name: 'الصف التاسع', subjects: [ { name: 'الجبر', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1Q_u-zOh06EW4fdIbmugdJNhtzEs18MLP' }, { name: 'اللغة العربية', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1kYcaoNIOcs41rHa25isIn8efflvKjE0f' }, { name: 'الفنون', icon: 'palette', url: 'https://drive.google.com/uc?export=download&id=1K1FEbBloCfsZz1Xi3XoYIPR6ANCXRSxl' }, { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1qg6QMhAnm2pdGXqhbrjQi8YIoAz6_4oJ' }, { name: 'اللغة الإنكليزية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1ntZry3lT48SnVZR5YnbBbkxFSPQDj40C' }, { name: 'اللغة الإنكليزية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1_Mko_BK3N7_rBsD2wckbybKv1UEsT1NJ' }, { name: 'اللغة الفرنسية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1m3m-rhhzJ2ozhuUpv8b0Fs7YnQ11otvL' }, { name: 'اللغة الفرنسية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1_jKc0jKHXqhuBdsfplspgg6SslKzzLWP' }, { name: 'الجغرافية', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1Bwgdk_WkKp0mZtsRQ5a6Y5YXPlkF2Cck' }, { name: 'الرياضيات (هندسة)', icon: 'architecture', url: 'https://drive.google.com/uc?export=download&id=1fVY2PtoyXfkl4mtvQLv8zg7lO0rc6mKL' }, { name: 'التاريخ', icon: 'history_edu', url: 'https://drive.google.com/uc?export=download&id=1GT6iuso9gxoKMqd9zw8eju8dn9sQnMcF' }, { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1C76lDr5sEm4ai7kioWlV6JScqPoSij5O' }, { name: 'الموسيقى', icon: 'music_note', url: 'https://drive.google.com/uc?export=download&id=1TeKAMGWpKw2OOOkQLeRBECmTsJ7ahZFW' }, { name: 'فيزياء - كيمياء', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1dDJeOS8Q2wjIrfJOt1P81wVH9gSMZvHC' }, { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1L09BcmUWfc_RQ4kZmPTy8Dl51QvrzqWk' }, { name: 'العلوم', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1NtpmiZldf1X8pVMu3Ld5Uz8JuBp6zsU6' }, { name: 'تكنلوجية الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=18_4pXCrhJjmivZoNNEguRujdMeAx0_4G' } ] },
             ]
         },
         {
             name: 'المرحلة الثانوية',
             icon: 'school',
             grades: [
-                { name: 'العاشر العلمي', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'الفيزياء', icon: 'bolt' }, { name: 'الكيمياء', icon: 'science' }, { name: 'علم الأحياء', icon: 'biotech' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'العاشر الأدبي', subjects: [ { name: 'الفلسفة', icon: 'psychology' }, { name: 'التاريخ', icon: 'history_edu' }, { name: 'الجغرافيا', icon: 'public' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'الحادي عشر العلمي', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'الفيزياء', icon: 'bolt' }, { name: 'الكيمياء', icon: 'science' }, { name: 'علم الأحياء', icon: 'biotech' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'الحادي عشر الأدبي', subjects: [ { name: 'الفلسفة', icon: 'psychology' }, { name: 'التاريخ', icon: 'history_edu' }, { name: 'الجغرافيا', icon: 'public' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'البكالوريا العلمي', subjects: [ { name: 'الرياضيات', icon: 'calculate' }, { name: 'الفيزياء', icon: 'bolt' }, { name: 'الكيمياء', icon: 'science' }, { name: 'العلوم', icon: 'biotech' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
-                { name: 'البكالوريا الأدبي', subjects: [ { name: 'الفلسفة', icon: 'psychology' }, { name: 'التاريخ', icon: 'history_edu' }, { name: 'الجغرافيا', icon: 'public' }, { name: 'اللغة العربية', icon: 'abc' }, { name: 'اللغة الإنجليزية', icon: 'translate' } ] },
+                { name: 'العاشر العلمي', subjects: [
+                    { name: 'الرياضيات الجزء الأول', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=10_82GlLfcQ-EHAIEvdWg1IXZ9BRCdrsZ' },
+                    { name: 'الرياضيات الجزء الثاني', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1A2_q9xm9dkkm-8alfCUidYQ_aCiwUjJz' },
+                    { name: 'الفيزياء - علمي', icon: 'bolt', url: 'https://drive.google.com/uc?export=download&id=1vh5dtezCKhTfc0bDu1J7Fcn7BWAkjmRA' },
+                    { name: 'الكيمياء - علمي', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1h5BOxXV2mhu-0Jwypc2wTE63emAJCYi3' },
+                    { name: 'العلوم - علمي', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1dWZMUVxG6fKFLmvRK1KASsvEhYRE6F9r' },
+                    { name: 'اللغة العربية - علمي', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=141fpcrgU0guzmn24MCPVaxnTT5wourjB' },
+                    { name: 'اللغة الإنكليزية (الكتاب الرسمي - علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1KISujZ1KdKK3qod6KL2t0AwMw02VVMVY' },
+                    { name: 'اللغة الإنكليزية (كتاب التمارين - علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1FFjrCzNM0mDu8DaOsU6mHPPLLXswFZ3Z' },
+                    { name: 'اللغة الفرنسية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1jpeds70ImcvbEFxe9c_6nO4t91mydQIu' },
+                    { name: 'اللغة الفرنسية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=107PjXxgmDF57IBCzBwFq2aqlarmtJ6iH' },
+                    { name: 'الفلسفة - علمي', icon: 'psychology', url: 'https://drive.google.com/uc?export=download&id=1YF8yWNovF6Daefp5NjbvBFUiorBgCCED' },
+                    { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1rno285TDnTJwA9gxAulTIRay_gbSWUHb' },
+                    { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1rHXJks-PPknqRpzsr8P3LhSeUr9PEU9m' },
+                    { name: 'تكنلوجية الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=1kBKcrx6nyB0OqXOSNyXFfkKGRWMq3fvs' }
+                ] },
+                { name: 'العاشر الأدبي', subjects: [
+                    { name: 'الرياضيات - الجبر', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1JtkzV7CjGAD2yrJ_oE0no41C_7Pbcfwk'},
+                    { name: 'اللغة الإنكليزية (كتاب التمارين - أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1VH_ZdrbnY9L_Q8SXZJXsiF6SjGbD_dCl' },
+                    { name: 'اللغة الإنكليزية (الكتاب الرسمي - أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1uvPbBRLfOlWI2zuP5g5-q0YogyS0GImO' },
+                    { name: 'اللغة الفرنسية (كتاب التمارين)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=107PjXxgmDF57IBCzBwFq2aqlarmtJ6iH' },
+                    { name: 'اللغة الفرنسية (الكتاب الرسمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1jpeds70ImcvbEFxe9c_6nO4t91mydQIu' },
+                    { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1rno285TDnTJwA9gxAulTIRay_gbSWUHb' },
+                    { name: 'الكيمياء - أدبي', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1QLGZLJk8dqKxdLt5z650Q9-hcEqJGP60' },
+                    { name: 'التاريخ - أدبي', icon: 'history_edu', url: 'https://drive.google.com/uc?export=download&id=1bceqqbou5B_eY_2myAyrqp5N0XValJoG' },
+                    { name: 'الفلسفة - أدبي', icon: 'psychology', url: 'https://drive.google.com/uc?export=download&id=1GK-AKZLgcMbvVKeaJ_ttOMPoUdd6WHhD' },
+                    { name: 'العلوم - أدبي', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1aaW2UDi5w6EGv4OHAHTzTr4dSh-v_d7m' },
+                    { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1rHXJks-PPknqRpzsr8P3LhSeUr9PEU9m' },
+                    { name: 'تكنلوجية الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=1kBKcrx6nyB0OqXOSNyXFfkKGRWMq3fvs' }
+                ] },
+                { name: 'الحادي عشر العلمي', subjects: [
+                    { name: 'الرياضيات الجزء الأول', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=10_82GlLfcQ-EHAIEvdWg1IXZ9BRCdrsZ' },
+                    { name: 'الرياضيات الجزء الثاني', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1A2_q9xm9dkkm-8alfCUidYQ_aCiwUjJz' },
+                    { name: 'الفيزياء (علمي)', icon: 'bolt', url: 'https://drive.google.com/uc?export=download&id=1vh5dtezCKhTfc0bDu1J7Fcn7BWAkjmRA' },
+                    { name: 'الكيمياء (علمي)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1h5BOxXV2mhu-0Jwypc2wTE63emAJCYi3' },
+                    { name: 'العلوم (علمي)', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1dWZMUVxG6fKFLmvRK1KASsvEhYRE6F9r' },
+                    { name: 'اللغة العربية (علمي)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=141fpcrgU0guzmn24MCPVaxnTT5wourjB' },
+                    { name: 'اللغة الإنكليزية الكتاب الرسمي (علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1KISujZ1KdKK3qod6KL2t0AwMw02VVMVY' },
+                    { name: 'اللغة الإنكليزية كتاب التمارين (علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1FFjrCzNM0mDu8DaOsU6mHPPLLXswFZ3Z' },
+                    { name: 'اللغة الفرنسية الكتاب الرسمي', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1jpeds70ImcvbEFxe9c_6nO4t91mydQIu' },
+                    { name: 'اللغة الفرنسية كتاب التمارين', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=107PjXxgmDF57IBCzBwFq2aqlarmtJ6iH' },
+                    { name: 'الفلسفة (علمي)', icon: 'psychology', url: 'https://drive.google.com/uc?export=download&id=1YF8yWNovF6Daefp5NjbvBFUiorBgCCED' },
+                    { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1rno285TDnTJwA9gxAulTIRay_gbSWUHb' },
+                    { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1rHXJks-PPknqRpzsr8P3LhSeUr9PEU9m' },
+                    { name: 'تكنولوجيا الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=1kBKcrx6nyB0OqXOSNyXFfkKGRWMq3fvs' }
+                ] },
+                { name: 'الحادي عشر الأدبي', subjects: [
+                    { name: 'الرياضيات – الجبر', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1JtkzV7CjGAD2yrJ_oE0no41C_7Pbcfwk' },
+                    { name: 'اللغة الإنكليزية كتاب التمارين (أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1VH_ZdrbnY9L_Q8SXZJXsiF6SjGbD_dCl' },
+                    { name: 'اللغة الإنكليزية الكتاب الرسمي (أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1uvPbBRLfOlWI2zuP5g5-q0YogyS0GImO' },
+                    { name: 'اللغة الفرنسية كتاب التمارين', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=107PjXxgmDF57IBCzBwFq2aqlarmtJ6iH' },
+                    { name: 'اللغة الفرنسية الكتاب الرسمي', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1jpeds70ImcvbEFxe9c_6nO4t91mydQIu' },
+                    { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1rno285TDnTJwA9gxAulTIRay_gbSWUHb' },
+                    { name: 'الكيمياء (أدبي)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1QLGZLJk8dqKxdLt5z650Q9-hcEqJGP60' },
+                    { name: 'التاريخ (أدبي)', icon: 'history_edu', url: 'https://drive.google.com/uc?export=download&id=1bceqqbou5B_eY_2myAyrqp5N0XValJoG' },
+                    { name: 'الفلسفة (أدبي)', icon: 'psychology', url: 'https://drive.google.com/uc?export=download&id=1GK-AKZLgcMbvVKeaJ_ttOMPoUdd6WHhD' },
+                    { name: 'العلوم (أدبي)', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=1aaW2UDi5w6EGv4OHAHTzTr4dSh-v_d7m' },
+                    { name: 'اللغة الروسية', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1rHXJks-PPknqRpzsr8P3LhSeUr9PEU9m' },
+                    { name: 'تكنولوجيا الاتصالات', icon: 'computer', url: 'https://drive.google.com/uc?export=download&id=1kBKcrx6nyB0OqXOSNyXFfkKGRWMq3fvs' }
+                ] },
+                { name: 'البكالوريا العلمي', subjects: [
+                    { name: 'الرياضيات – الجزء الأول', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1g8stH3uLRiSW7a-4Omoir7kIhG0LzslV' },
+                    { name: 'الرياضيات – الجزء الثاني', icon: 'calculate', url: 'https://drive.google.com/uc?export=download&id=1gOCVKw0M86W33kwie5q4XfPzI7bqP04f' },
+                    { name: 'الفيزياء (علمي)', icon: 'bolt', url: 'https://drive.google.com/uc?export=download&id=1erPcYAQid346vQA-XdasuaiHILz_PVu9' },
+                    { name: 'الكيمياء (علمي)', icon: 'science', url: 'https://drive.google.com/uc?export=download&id=1yOB2ts80WewD7ZMzfB6YQIkfSo-E9jWK' },
+                    { name: 'العلوم (علمي)', icon: 'biotech', url: 'https://drive.google.com/uc?export=download&id=19KOnpbCmhztTX1cU85QAiU4kyLcXd5Gq' },
+                    { name: 'اللغة العربية (علمي)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=1ZKc_xF7ePQTcrKHXp0KTxLL9dmGoZiQA' },
+                    { name: 'اللغة الإنكليزية الكتاب الرسمي (علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1ngw0V9z4K-U0ciLnXsygVgWAgJGYqobE' },
+                    { name: 'اللغة الإنكليزية كتاب التمارين (علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1KzmNwEXkWQ6D17xs7iznNduVcOxF1Cu7' },
+                    { name: 'اللغة الفرنسية كتاب التمارين', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1NZG3g6giqFb2Vy6IZGVrvFqJwdcpvs49' },
+                    { name: 'اللغة الروسية (علمي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1gBpxOQ6Bh3xmjPNu42qnHy0q3LrxdMFv' },
+                    { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1h1KsJ0tumVD2EGyDUoHoFq6RvxMygfTu' },
+                    { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1Aqnh37Q2qsPiq75Q_T8EFaHk_nnV5EoW' }
+                ] },
+                { name: 'البكالوريا الأدبي', subjects: [
+                    { name: 'الفلسفة (أدبي) – الفصل الأول', icon: 'psychology', url: 'https://drive.google.com/uc?export=download&id=1Iip2B92OkTNh7hywWGy4oi4_LZK2eUz-' },
+                    { name: 'الفلسفة (أدبي) – الفصل الثاني', icon: 'psychology', url: 'https://drive.google.com/uc?export=download&id=1G7ciDsP1LqkrrabngYPBetQUZSaBR8Nq' },
+                    { name: 'التاريخ (أدبي)', icon: 'history_edu', url: 'https://drive.google.com/uc?export=download&id=1gkhdoqbM5s2H__Xe3ZfpZKaPE0doumrm' },
+                    { name: 'الجغرافية (أدبي)', icon: 'public', url: 'https://drive.google.com/uc?export=download&id=1X2lkmFiOl5Z2r96ududL1bxOuQNRJEVN' },
+                    { name: 'اللغة العربية (أدبي)', icon: 'abc', url: 'https://drive.google.com/uc?export=download&id=12DeFqKPU09whaJqn9AGnbyw_xk0qHIsz' },
+                    { name: 'اللغة الإنكليزية الكتاب الرسمي (أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1fdwUu_AVuSR5zY8-i_I96A5ptB-YBceM' },
+                    { name: 'اللغة الإنكليزية كتاب التمارين (أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1Yo5Tt9udqdNyKYAfOzMYwerDKr-4SMM0' },
+                    { name: 'اللغة الفرنسية (أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1LnhwWm_76hNxkDGljFJhXKXbF920Fxng' },
+                    { name: 'اللغة الفرنسية كتاب التمارين', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1NZG3g6giqFb2Vy6IZGVrvFqJwdcpvs49' },
+                    { name: 'اللغة الروسية (أدبي)', icon: 'translate', url: 'https://drive.google.com/uc?export=download&id=1CjpRYg72dAHFQU-CReiR9NP5-6Nqbrj_' },
+                    { name: 'الديانة الإسلامية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1h1KsJ0tumVD2EGyDUoHoFq6RvxMygfTu' },
+                    { name: 'الديانة المسيحية', icon: 'auto_stories', url: 'https://drive.google.com/uc?export=download&id=1Aqnh37Q2qsPiq75Q_T8EFaHk_nnV5EoW' }
+                ] },
             ]
         }
     ];
@@ -456,6 +610,9 @@ const BooksPage = () => {
                 )}
                 <h1>{getTitle()}</h1>
             </div>
+            <p className="books-intro-message">
+                هذه هي النسخ المعتمدة رسميًا من وزارة التربية السورية للعام الدراسي 2025-2026. نعمل باستمرار على إضافة أي كتب ناقصة.
+            </p>
             {renderContent()}
         </div>
     );
@@ -641,34 +798,70 @@ const SummarizerPage = () => {
 
     const handleDownloadMindMap = async () => {
         const element = mindMapRef.current;
-        if (!element || typeof window.html2canvas === 'undefined') {
-            alert('لا يمكن تحميل الخريطة الذهنية.');
+        if (!element || typeof window.html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+            alert('لا يمكن تحميل الخريطة الذهنية. قد تكون مكتبة التحميل مفقودة.');
             return;
         }
 
+        // Create a clone to render without affecting the live view
         const clone = element.cloneNode(true) as HTMLElement;
-        clone.style.transform = '';
+        clone.style.transform = ''; // Reset any zoom/pan transforms
         clone.style.position = 'absolute';
         clone.style.top = '-9999px';
         clone.style.left = '-9999px';
-        clone.style.width = `${element.offsetWidth}px`;
-        clone.style.height = `${element.offsetHeight}px`;
+        // Unset any inline dimensions that might constrain it so we can measure its full size
+        clone.style.width = 'auto';
+        clone.style.height = 'auto';
         document.body.appendChild(clone);
-
+        
+        // Get the full scroll dimensions of the cloned, unconstrained element
+        const fullWidth = clone.scrollWidth;
+        const fullHeight = clone.scrollHeight;
+        
         try {
             const canvas = await window.html2canvas(clone, {
                 useCORS: true,
                 scale: 2,
-                backgroundColor: '#F7F5F2'
+                backgroundColor: '#F7F5F2',
+                // Explicitly provide the full dimensions to html2canvas
+                width: fullWidth,
+                height: fullHeight,
             });
-            const image = canvas.toDataURL('image/png', 1.0);
-            const link = document.createElement('a');
-            link.download = 'mind-map.png';
-            link.href = image;
-            link.click();
+            const imgData = canvas.toDataURL('image/png');
+            
+            // Determine the best orientation for the PDF
+            const orientation = fullWidth > fullHeight ? 'l' : 'p'; // l for landscape, p for portrait
+
+            const pdf = new window.jspdf.jsPDF({
+                orientation: orientation,
+                unit: 'pt',
+                format: 'a4'
+            });
+    
+            const margin = 20;
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+            const usableWidth = pdfWidth - margin * 2;
+            const usableHeight = pdfHeight - margin * 2;
+    
+            const ratio = fullWidth / fullHeight;
+            
+            let finalWidth = usableWidth;
+            let finalHeight = finalWidth / ratio;
+            
+            if (finalHeight > usableHeight) {
+                finalHeight = usableHeight;
+                finalWidth = finalHeight * ratio;
+            }
+    
+            const x = (pdfWidth - finalWidth) / 2;
+            const y = (pdfHeight - finalHeight) / 2;
+    
+            pdf.addImage(imgData, 'PNG', x, y, finalWidth, finalHeight);
+            pdf.save('mind-map.pdf');
         } catch (error) {
-            console.error('Error downloading mind map:', error);
-            alert('حدث خطأ أثناء إنشاء الصورة.');
+            console.error('Error downloading mind map as PDF:', error);
+            alert('حدث خطأ أثناء إنشاء ملف PDF.');
         } finally {
             document.body.removeChild(clone);
         }
@@ -862,6 +1055,7 @@ const QuizBuilderPage = () => {
     const [questions, setQuestions] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [showAnswers, setShowAnswers] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -880,6 +1074,7 @@ const QuizBuilderPage = () => {
         setIsLoading(true);
         setQuestions([]);
         setError('');
+        setShowAnswers(false);
 
         try {
             const messageParts: any[] = [];
@@ -1043,17 +1238,22 @@ const QuizBuilderPage = () => {
                             {q.type === 'Multiple Choice' && q.options && (
                                 <ul className="options-list">
                                     {q.options.map((option, i) => (
-                                        <li key={i} className={option === q.answer ? 'correct' : ''}>
+                                        <li key={i} className={showAnswers && option === q.answer ? 'correct' : ''}>
                                             {option}
                                         </li>
                                     ))}
                                 </ul>
                             )}
-                             {q.type !== 'Multiple Choice' && (
+                             {showAnswers && q.type !== 'Multiple Choice' && (
                                <p className="answer-text"><strong>الإجابة:</strong> {q.answer}</p>
                              )}
                         </div>
                     ))}
+                    {!showAnswers && (
+                        <button onClick={() => setShowAnswers(true)} className="generate-btn" style={{marginTop: '1.5rem'}}>
+                            الحل
+                        </button>
+                    )}
                 </div>
             )}
         </div>
@@ -1277,7 +1477,9 @@ const UpdatesPage = () => {
         { icon: 'school', title: 'دورات عامة', description: 'دورات شاملة لمختلف المواد الدراسية لتغطية المنهج بالكامل.' },
         { icon: 'note_alt', title: 'نوط وملخصات', description: 'ملخصات مركزة ونوط امتحانية لمساعدتك على المراجعة قبل الاختبارات.' },
         { icon: 'forum', title: 'غرف دردشة خاصة', description: 'غرف نقاش خاصة بكل دورة للتفاعل مع المعلمين والزملاء وطرح الأسئلة.' },
-        { icon: 'auto_awesome', title: 'أنظمة ذكية للمساعدة', description: 'أدوات ذكية لتحليل تقدمك الدراسي وتقديم توصيات وخطط مخصصة لك.' }
+        { icon: 'auto_awesome', title: 'أنظمة ذكية للمساعدة', description: 'أدوات ذكية لتحليل تقدمك الدراسي وتقديم توصيات وخطط مخصصة لك.' },
+        { icon: 'newspaper', title: 'تتبع آخر الأخبار', description: 'متابعة مستمرة لآخر الأخبار والمستجدات التي تهم الطلاب، سواء من وزارة التربية أو مصادر أخرى.' },
+        { icon: 'account_circle', title: 'حفظ البيانات', description: 'إمكانية إنشاء حساب شخصي لحفظ بياناتك، تقدمك الدراسي، وتخصيص تجربتك داخل التطبيق.' }
     ];
 
     const socialLinks = [
@@ -1305,7 +1507,7 @@ const UpdatesPage = () => {
                 <p>تواصلوا معنا مباشرة عبر واتساب للحصول على حساب معلم والاستفادة من الميزات المخصصة لكم.</p>
                 <div className="teacher-registration-form">
                     <a 
-                        href="https://wa.me/963987654321"
+                        href="https://wa.me/963983697920"
                         className="whatsapp-register-btn" 
                         target="_blank" 
                         rel="noopener noreferrer"
